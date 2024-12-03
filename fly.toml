@@ -6,7 +6,7 @@ console_command = "bun run boot"
 swap_size_mb = 512
 
 [build]
-dockerfile = "Dockerfile"
+dockerfile = "dockerfile"
 
 
 [http_service]

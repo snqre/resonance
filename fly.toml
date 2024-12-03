@@ -2,7 +2,7 @@ app = "resonance"
 primary_region = "ord"
 kill_signal = "SIGTERM"
 kill_timeout = 120
-console_command = "bun run boot";
+console_command = "bun run boot"
 swap_size_mb = 512
 
 [http_service]

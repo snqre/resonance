@@ -3,8 +3,9 @@ import {Result} from "ts-results";
 import {Option} from "ts-results";
 import {Some} from "ts-results";
 import {None} from "ts-results";
-import {createRoot as Root} from "react-dom/client";
+import {createRoot, createRoot as Root} from "react-dom/client";
 import {useDevice} from "./hook/Device";
+
 import * as React from "react";
 import * as ColorPalette from "./constant/ColorPalette";
 import * as Recharts from "recharts";
@@ -118,8 +119,4 @@ function App(): React.ReactNode {
     </>;
 }
 
-(() => {
-    let element = document.getElementById("root")!;
-    Root(element).render(<App/>);
-    return;
-})();
+createRoot(document.getElementById("root")!).render(<App/>);

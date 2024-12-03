@@ -1,7 +1,11 @@
 {
   "name": "resonance",
-  "module": "root/app/App.ts",
+  "module": "src/server/App.ts",
   "type": "module",
+  "scripts": {
+    "build": "bun run script/BuildScript.ts",
+    "boot": "bun run build && bun run dist/App.js"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
@@ -12,11 +16,13 @@
     "@types/express": "^5.0.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "all": "^0.0.0",
     "axios": "^1.7.8",
     "express": "^4.21.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.13.3",
+    "robus": "^0.0.6",
     "ts-results": "^3.3.0",
     "tslib": "^2.8.1"
   }

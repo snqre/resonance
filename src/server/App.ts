@@ -5,7 +5,7 @@ import * as Path from "path";
 import * as ChildProcess from "child_process";
 
 (async () => {
-    let web = Result.wrap(() => Path.join(__dirname, "web"));
+    let web = Result.wrap(() => Path.join(__dirname, "client"));
     let tsx = Result.wrap(() => Path.join(web.unwrap(), "App.tsx"))
     let html = Result.wrap(() => Path.join(web.unwrap(), "App.html"));
     (await Result.wrapAsync(async () => await new Promise(resolve => ChildProcess.exec(`bun build ${tsx.unwrap()} --outdir ${web.unwrap()}`, e => resolve(e))))).unwrap();

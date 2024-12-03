@@ -38,7 +38,7 @@ import * as ChildProcess from "child_process";
         });
         return;
     }, 1000);
-    let port: number = 3000;
+    let port: number = 8080;
     let app = Express()
         .use(Express.static(web.unwrap()))
         .use(Express.json())

@@ -29,6 +29,31 @@ function Password(_password: string): PasswordR {
     }
 }
 
+type AssetDataR = Result<AssetDataT, AssetDataE>;
+type AssetDataT = AssetData;
+type AssetDataE =
+    | "ERR_INVALID_SYMBOL"
+    | "ERR_INVALID_AMOUNT"
+    | "ERR_INVALID_QUOTE"
+    | "ERR_INVALID_VALUE";
+type AssetData = {
+    symbol: string;
+    amount: number;
+    quote: number;
+    value: number;
+};
+function AssetData(_$: AssetData): AssetDataR {
+    /***/ {
+        if (_$.symbol.length === 0) return Err("ERR_INVALID_SYMBOL");
+        if (_$.amount < 0) return Err("ERR_INVALID_AMOUNT");
+        if (_$.amount > Number.MAX_SAFE_INTEGER) return Err("ERR_INVALID_AMOUNT");
+        if (_$.quote < 0) return Err("ERR_INVALID_QUOTE");
+        if (_$.quote > Number.MAX_SAFE_INTEGER) return Err("ERR_INVALID_QUOTE");
+        if (_$.value < 0) return Err("ERR_INVALID_VALUE");
+        if (_$.quote > Number.MAX_SAFE_INTEGER) return Err("ERR_INVALID_VALUE");
+        return Ok(_$);
+    }
+}
 
 type AssetR = Result<AssetT, AssetE>;
 type AssetT = Asset;
@@ -40,13 +65,14 @@ type Asset = {
     amount(): number;
     quote(): Promise<Result<number, unknown>>;
     value(): Promise<Result<number, unknown>>;
+    zip(): Promise<AssetDataR>;
 };
 function Asset(_symbol: string, _amount: number): AssetR {
     /***/ {
         if (_symbol.length === 0) return Err("ERR_INVALID_SYMBOL");
         if (_amount < 0) return Err("ERR_INVALID_AMOUNT");
         if (_amount > Number.MAX_SAFE_INTEGER) return Err("ERR_INVALID_AMOUNT");
-        return Ok({ symbol, amount, quote, value });
+        return Ok({ symbol, amount, quote, value, zip });
     }
 
     function symbol(): ReturnType<Asset["symbol"]> {
@@ -71,6 +97,15 @@ function Asset(_symbol: string, _amount: number): AssetR {
         let quote_: Awaited<ReturnType<typeof quote>> = await quote();
         if (quote_.err) return quote_;
         return Ok(amount() * quote_.unwrap());
+    }
+
+    async function zip(): ReturnType<Asset["zip"]> {
+        return AssetData({
+            symbol: symbol(),
+            amount: amount(),
+            quote: (await quote()).unwrapOr(0),
+            value: (await value()).unwrapOr(0)
+        });
     }
 }
 
@@ -222,26 +257,21 @@ function Treasury(_supply: number, _assets: Array<Readonly<Asset>>): TreasuryR {
 }
 
 
-type ApiAsset = {
-    symbol: string;
-    amount: number;
-    quote: number;
-    value: number;
-};
-
-type Api = {
-    /** @pure */ "/": void;
-    /** @pure */ "/treasury/valuePerShare": void;
-    /** @admin @pure */ "/treasury/supply": [password: string];
-    /** @admin @pure */ "/treasury/assets": [password: string];
-    /** @admin */ "/treasury/insert": [password: string, asset: ApiAsset];
-    /** @admin */ "/treasury/remove": [password: string];
-    /** @admin */ "/treasury/removeByKey": [password: string, key: number];
-    /** @admin */ "/treasury/removeBySymbol": [password: string, symbol: string];
-    /** @admin */ "/treasury/mint": [password: string, amount: number];
-    /** @admin */ "/treasury/burn": [password: string, amount: number];
-    /** @admin @pure */ "/treasury/value": [password: string];
-};
+type Api = [
+    "/",
+    "/supply",
+    "/assets",
+    "/assets-by-key",
+    "/assets-by-symbol",
+    "/insert",
+    "/remove",
+    "/remove-by-key",
+    "/remove-by-symbol",
+    "/mint",
+    "/burn",
+    "/value",
+    "/value-per-share"
+];
 
 type App = {
     run(): ReturnType<ReturnType<typeof express>["listen"]>;
@@ -264,46 +294,76 @@ function App(): App {
         return express()
             .use(express.static(_webDirectory))
             .use(express.json())
-            .get("/", async (_, rs) => rs.sendFile(join(_webDirectory, "App.html")))
-            .post("/treasury/supply", async (rq, rs) => {
-                if (!_isFromAdmin(rq)) return;
-                rs.send(_treasury.supply());
+
+            .get<Api[number]>("/", async (_, rs) => rs.sendFile(join(_webDirectory, "App.html")))
+            
+            .post<Api[number]>("/supply", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
+                else rs.send(_treasury.supply());
                 return;
             })
-            .post("/treasury/assets", async (rq, rs) => {
-                if (!_isFromAdmin(rq)) return;
-                let promisedResponse: 
-                    Array<Promise<{
-                        symbol: string;
-                        amount: number;
-                        quote: number;
-                        value: number;
-                    }>> 
-                    = 
-                    _treasury
+
+            /// NOTE If any `AssetData` is broken, it will be omitted in the response.
+            .post<Api[number]>("/assets", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
+                else 
+                    rs.send(((await Promise
+                        .all(_treasury
                         .assets()
-                        .map(async asset => ({
-                            symbol: asset.symbol(),
-                            amount: asset.amount(),
-                            quote: (await asset.quote()).unwrapOr(0),
-                            value: (await asset.value()).unwrapOr(0)
-                        }));
-                let response: 
-                    Array<{
-                        symbol: string;
-                        amount: number;
-                        quote: number;
-                        value: number;
-                    }> 
-                    = await Promise.all(promisedResponse);
-                rs.send(response);
+                        .map(async asset => (await asset.zip()))))
+                        .filter(asset => asset.ok)
+                        .map(asset => asset.unwrap())));
                 return;
             })
             
+            .post<Api[number]>("/assets-by-key", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) { rs.send("ERR_INVALID_PASSWORD"); return; }
+                let { _, key } = rq.body.request;
+                if (typeof key === undefined) { rs.send("ERR_KEY_REQUIRED"); return; }
+                if (typeof key !== "number") { rs.send("ERR_INVALID_KEY"); return; }
+                let asset: ReturnType<Treasury["assetsByKey"]> = _treasury.assetsByKey(BigInt(key));
+                if (asset.none) { rs.send("ERR_ASSET_NOT_FOUND"); return; }
+                rs.send(asset.unwrap());
+                return;
+            })
+            
+            .post<Api[number]>("/assets-by-symbol", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) {
+                    rs.send("ERR_INVALID_PASSWORD");
+                    return;
+                }
+                let { _, symbol } = rq.body.request;
+                if (typeof symbol !== "string") {
+                    rs.send("ERR_");
+                    return;
+                }
+
+            })
+
+            .post<Api[number]>("/insert", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) { rs.send("ERR_INVALID_PASSWORD"); return }
+                let { _, asset: assetD } = rq.body.request;
+                if (typeof assetD === undefined) { rs.send("ERR_ASSET_REQUIRED"); return; }
+                let match: boolean =
+                    "symbol" in assetD
+                    && "amount" in assetD
+                    && typeof assetD.symbol === "string"
+                    && typeof assetD.amount === "number";
+                if (!match) { rs.send("ERR_INVALID_ASSET"); return; }
+                let asset: AssetR = Asset(assetD.symbol, assetD.amount);
+                if (asset.err) { rs.send(asset.toString()); return; }
+                _treasury.insert(asset.unwrap());
+                return;
+            })
+
+            .post<Api[number]>("/remove", async (rq, rs) => {
+                
+            })
+
             .listen(Number(_port));
     }
 
-    function _isFromAdmin(rq: Request): boolean {
+    function _hasValidPassword(rq: Request): boolean {
         let match: boolean =
             "password" in rq.body
             && typeof rq.body.password

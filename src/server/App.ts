@@ -222,6 +222,27 @@ function Treasury(_supply: number, _assets: Array<Readonly<Asset>>): TreasuryR {
 }
 
 
+type ApiAsset = {
+    symbol: string;
+    amount: number;
+    quote: number;
+    value: number;
+};
+
+type Api = {
+    /** @pure */ "/": void;
+    /** @pure */ "/treasury/valuePerShare": void;
+    /** @admin @pure */ "/treasury/supply": [password: string];
+    /** @admin @pure */ "/treasury/assets": [password: string];
+    /** @admin */ "/treasury/insert": [password: string, asset: ApiAsset];
+    /** @admin */ "/treasury/remove": [password: string];
+    /** @admin */ "/treasury/removeByKey": [password: string, key: number];
+    /** @admin */ "/treasury/removeBySymbol": [password: string, symbol: string];
+    /** @admin */ "/treasury/mint": [password: string, amount: number];
+    /** @admin */ "/treasury/burn": [password: string, amount: number];
+    /** @admin @pure */ "/treasury/value": [password: string];
+};
+
 type App = {
     run(): ReturnType<ReturnType<typeof express>["listen"]>;
 };
@@ -251,12 +272,14 @@ function App(): App {
             })
             .post("/treasury/assets", async (rq, rs) => {
                 if (!_isFromAdmin(rq)) return;
-                let promisedResponse: Array<Promise<{
-                    symbol: string;
-                    amount: number;
-                    quote: number;
-                    value: number;
-                }>> = 
+                let promisedResponse: 
+                    Array<Promise<{
+                        symbol: string;
+                        amount: number;
+                        quote: number;
+                        value: number;
+                    }>> 
+                    = 
                     _treasury
                         .assets()
                         .map(async asset => ({
@@ -265,15 +288,18 @@ function App(): App {
                             quote: (await asset.quote()).unwrapOr(0),
                             value: (await asset.value()).unwrapOr(0)
                         }));
-                let response: Array<{
-                    symbol: string;
-                    amount: number;
-                    quote: number;
-                    value: number;
-                }> = await Promise.all(promisedResponse);
+                let response: 
+                    Array<{
+                        symbol: string;
+                        amount: number;
+                        quote: number;
+                        value: number;
+                    }> 
+                    = await Promise.all(promisedResponse);
                 rs.send(response);
                 return;
             })
+            
             .listen(Number(_port));
     }
 
@@ -288,61 +314,3 @@ function App(): App {
 }
 
 App().run();
-
-
-
-
-
-
-
-
-
-
-
-(async () => {
-
-
-
-    let web = Result.wrap(() => Path.join(__dirname, "client"));
-    let tsx = Result.wrap(() => Path.join(web.unwrap(), "App.tsx"))
-    let html = Result.wrap(() => Path.join(web.unwrap(), "App.html"));
-    (await Result.wrapAsync(async () => await new Promise(resolve => ChildProcess.exec(`bun build ${tsx.unwrap()} --outdir ${web.unwrap()}`, e => resolve(e))))).unwrap();
-    let symbols = process.env?.["SYMBOLS"]?.split(",");
-    let amounts = process.env?.["AMOUNTS"]?.split(",").map(amount => Number(amount));
-    let supply = Number(process.env?.["SUPPLY"]);
-    let market: Market = Market();
-    let assets = symbols?.map(async (symbol, key) => {
-        let price = await market.quote(symbol);
-        let amount: number;
-        if (amounts) amount = amounts[key];
-        else amount = 0;
-        return amount * price.unwrapOr(0);
-    });
-    let sum: number = 0;
-    await new Promise(resolve => assets?.forEach(async (asset, key) => {
-        sum += (await asset);
-        if (key === assets.length - 1) resolve(None);
-        return;
-    }));
-    let nav = sum / supply;
-    let dataset: Array<{
-        timestamp: number;
-        price: number;
-    }> = [];
-    setInterval(() => {
-        dataset.push({
-            timestamp: Date.now(),
-            price: nav
-        });
-        return;
-    }, 1000);
-    let port: number = 8080;
-    let app = Express()
-        .use(Express.static(web.unwrap()))
-        .use(Express.json())
-        .get("/", (rq, rs) => rs.sendFile(html.unwrap()))
-        .get("/dataset", (rq, rs) => {
-            rs.send(dataset);
-        })
-        .listen(port);
-})();

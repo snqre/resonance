@@ -1,22 +1,31 @@
-app = "resonance"
-primary_region = "ord"
-kill_signal = "SIGTERM"
-kill_timeout = 120
-console_command = "bun run boot"
+# fly.toml app configuration file generated for resonance-rough-voice-4184 on 2024-12-03T13:35:34+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'resonance-rough-voice-4184'
+primary_region = 'ord'
+kill_signal = 'SIGTERM'
+kill_timeout = '2m0s'
 swap_size_mb = 512
+console_command = 'bun run boot'
 
 [build]
-dockerfile = "dockerfile"
-
+  dockerfile = 'Dockerfile'
 
 [http_service]
-internal_port = 8080
-force_https = true
-auto_stop_machines = "stop"
-auto_start_machines = true
-min_machines_running = 0
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
 
-[http_service.concurrency]
-type = "requests"
-soft_limit = 200
-hard_limit = 250
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 250
+    soft_limit = 200
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

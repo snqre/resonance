@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "bun run script/BuildScript.ts",
-    "boot": "bun run build && bun run dist/App.js"
+    "start": "bun run build && bun run dist/App.js"
   },
   "devDependencies": {
     "@types/bun": "latest"

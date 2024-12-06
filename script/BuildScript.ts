@@ -35,7 +35,7 @@ let app1: string = "src/client/App.html";
     format: ["cjs", "esm"],
     dts: true,
     tsconfig: "tsconfig.json",
-    minify: false,
+    minify: true,
     outDir: "dist"
     
 }))).unwrap();

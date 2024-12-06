@@ -1,5 +1,7 @@
 import { type AxiosResponse } from "axios";
 import { type Request } from "express";
+import { type RedisClientType } from "redis";
+import { createClient as RedisClient } from "redis";
 import { default as Axios } from "axios";
 import { Option } from "robus";
 import { Result } from "robus";
@@ -9,6 +11,76 @@ import { Some } from "robus";
 import { None } from "robus";
 import { join } from "path";
 import { default as express } from "express";
+
+type Unsafe = {
+    unwrap(): unknown;
+};
+function Unsafe(_item: unknown): Unsafe {
+    /***/ return { unwrap };
+
+    function unwrap(): unknown {
+        return _item;
+    }
+}
+
+type Database = {
+    get(key: string): Promise<Ok<unknown> | Err<unknown>>;
+    set(key: string, value: string): Promise<Result<Option<string>, unknown>>;
+};
+
+type RedisR = RedisT | RedisE;
+type RedisT = Ok<Redis>;
+type RedisE =
+    | Err<"ERR_HOST_REQUIRED">
+    | Err<"ERR_PORT_BELOW_ZERO">
+    | Err<"ERR_PASSWORD_REQUIRED">
+    | Err<Unsafe>;
+type Redis =
+    & Database
+    & {
+    disconnect(): Promise<Result<void, unknown>>;
+};
+async function Redis(_host: string, _port: bigint, _password: string): Promise<RedisR> {
+    let _socket: RedisClientType;
+
+    /***/ {
+        if (_host.length === 0) return Err("ERR_HOST_REQUIRED");
+        if (_port < 0n) return Err("ERR_PORT_BELOW_ZERO");
+        if (_password.length === 0) return Err("ERR_PASSWORD_REQUIRED");
+        let r = await Result.wrapAsync(async () => {
+            _socket = RedisClient({
+                password: _password,
+                socket: {
+                    host: _host,
+                    port: Number(_port)
+                }
+            });
+            await _socket.connect();
+        });
+        if (r.err) return Err(Unsafe(r.val));
+        return Ok({ get, set, disconnect });
+    }
+
+    async function get(... [key]: Parameters<Redis["get"]>): ReturnType<Redis["get"]> {
+        return await Result.wrapAsync(async () => await _socket.get(key));        
+    }
+
+    async function set(... [key, value]: Parameters<Redis["set"]>): ReturnType<Redis["set"]> {
+        let r: Result<string | null, unknown> = await Result.wrapAsync(async () => await _socket.set(key, value));
+        if (r.err) return r;
+        if (typeof r === "string") return Ok(Some(r));
+        if (typeof r === null) return Ok(None);
+        return Ok(None);
+    }
+
+    async function disconnect(): ReturnType<Redis["disconnect"]> {
+        return await Result.wrapAsync(async () => {
+            await _socket.quit();
+            return;
+        });
+    }
+}
+
 
 type PriceVectorDataR = PriceVectorDataT | PriceVectorDataE;
 type PriceVectorDataT = Ok<PriceVectorData>;
@@ -35,10 +107,7 @@ function PriceVectorData(_$: PriceVectorData): PriceVectorDataR {
 
 type PriceVectorR = PriceVectorT | PriceVectorE;
 type PriceVectorT = Ok<PriceVector>;
-type PriceVectorE = 
-    | Err<"ERR_TIMESTAMP_BELOW_ZERO">
-    | Err<"ERR_PRICE_BELOW_ZERO">
-    | Err<"ERR_PRICE_ABOVE_MSI">;
+type PriceVectorE = Err<"ERR_TIMESTAMP_BELOW_ZERO"> | Err<"ERR_PRICE_BELOW_ZERO"> | Err<"ERR_PRICE_ABOVE_MSI">;
 type PriceVector = {
     timestamp(): bigint;
     price(): number;
@@ -87,10 +156,7 @@ function PriceVectorSet(_set: Array<PriceVector>): PriceVectorSet {
     }
 
     function has(vector: PriceVector): boolean {
-        let match:
-            | PriceVector
-            | void
-            = _set.find(x => x.timestamp() === vector.timestamp());
+        let match: PriceVector | void = _set.find(x => x.timestamp() === vector.timestamp());
         if (match) return true;
         return false;
     }
@@ -299,10 +365,10 @@ function Asset(_symbol: string, _amount: number): AssetR {
 }
 
 
-type TreasuryR = Result<TreasuryT, TreasuryE>;
-type TreasuryT = Treasury;
+type TreasuryR = TreasuryT | TreasuryE;
+type TreasuryT = Ok<Treasury>;
 type TreasuryE = 
-    | "ERR_INVALID_SUPPLY";
+    | Err<"ERR_INVALID_SUPPLY">;
 type Treasury = {
     supply(): number;
     assets(): ReadonlyArray<Readonly<Asset>>;
@@ -310,20 +376,10 @@ type Treasury = {
     assetsBySymbol(symbol: string): Option<Readonly<Asset>>;
     insert(asset: AssetR | Asset): Result<void, AssetE>;
     remove(): void;
-    removeByKey(key: bigint):
-        | Ok<void>
-        | Err<"ERR_ASSET_NOT_FOUND">;
-    removeBySymbol(symbol: string):
-        | Ok<void>
-        | Err<"ERR_ASSET_NOT_FOUND">;
-    mint(amount: number): 
-        | Ok<void>
-        | Err<"ERR_INVALID_AMOUNT">
-        | Err<"ERR_SUPPLY_OVERFLOW">;
-    burn(amount: number):
-        | Ok<void>
-        | Err<"ERR_INVALID_AMOUNT">
-        | Err<"ERR_SUPPLY_UNDERFLOW">;
+    removeByKey(key: bigint): Ok<void> | Err<"ERR_ASSET_NOT_FOUND">;
+    removeBySymbol(symbol: string): Ok<void> | Err<"ERR_ASSET_NOT_FOUND">;
+    mint(amount: number): Ok<void> | Err<"ERR_INVALID_AMOUNT"> | Err<"ERR_SUPPLY_OVERFLOW">;
+    burn(amount: number): Ok<void> | Err<"ERR_INVALID_AMOUNT"> | Err<"ERR_SUPPLY_UNDERFLOW">;
     value(): Promise<Result<number, unknown>>;
     valuePerShare(): Promise<Result<number, unknown>>;
 };
@@ -448,39 +504,77 @@ function Treasury(_supply: number, _assets: Array<Readonly<Asset>>): TreasuryR {
 
 type Api = [
     "/",
-    "/supply",
-    "/assets",
-    "/assets-by-key",
-    "/assets-by-symbol",
-    "/insert",
-    "/remove",
-    "/remove-by-key",
-    "/remove-by-symbol",
-    "/mint",
-    "/burn",
-    "/value",
-    "/value-per-share",
-    "/cache"
+    "/chart/vector",
+    "/chart/vector/range",
+    "/treasury/supply",
+    "/treasury/assets",
+    "/treasury/assets-by-key",
+    "/treasury/assets-by-symbol",
+    "/treasury/insert",
+    "/treasury/remove",
+    "/treasury/remove-by-key",
+    "/treasury/remove-by-symbol",
+    "/treasury/mint",
+    "/treasury/burn",
+    "/treasury/value",
+    "/treasury/value/share"
 ];
 
+type AppR = AppT | AppE;
+type AppT = Ok<App>;
+type AppE =
+    | TreasuryE
+    | PasswordE
+    | RedisE
+    | Err<"ERR_MISSING_PASSWORD">
+    | Err<"ERR_MISSING_REDIS_PASSWORD">;
 type App = {
     run(): ReturnType<ReturnType<typeof express>["listen"]>;
 };
-function App(): App {
+async function App(): Promise<AppR> {
     let _webDirectory: string;
     let _port: bigint;
     let _password: Password;
     let _treasury: Treasury;
     let _set: PriceVectorSet;
+    let _redis: Redis;
 
     /***/ {
         _webDirectory = join(__dirname, "web");
         _port = 8080n;
-        _password = Password(process.env?.["PASSWORD"] ?? "").expect("ERR_PASSWORD_REQUIRED");
         _treasury = Treasury(0, []).unwrap();
         _set = PriceVectorSet([]);
-        return { run };
     }
+
+    /***/ {
+        let r: TreasuryR = Treasury(0, []);
+        if (r.err) return r;
+        _treasury = r.unwrap();
+    }
+
+    /***/ {
+        let env:
+            | string
+            | void
+            = process.env?.["PASSWORD"];
+        if (!env) return Err("ERR_MISSING_PASSWORD");
+        let r: PasswordR = await Password(env);
+        if (r.err) return r;
+        _password = r.unwrap();
+    }
+
+    /***/ {
+        let env:
+            | string
+            | void
+            = process.env?.["REDIS_PASSWORD"];
+        if (!env) return Err("ERR_MISSING_REDIS_PASSWORD");
+        let r: RedisR = await Redis("redis-15112.c259.us-central1-2.gce.redns.redis-cloud.com", 15112n, env);
+        if (r.err) return r;
+        _redis = r.unwrap();
+    }
+
+    /***/ return Ok({ run });
 
     function run(): ReturnType<App["run"]> {
         return express()
@@ -489,25 +583,69 @@ function App(): App {
 
             .get<Api[number]>("/", async (_, rs) => rs.sendFile(join(_webDirectory, "App.html")))
 
-            .get("/vectors", (_, rs) => {
-                _set.insert(PriceVector(4n, 20).unwrap());
-                _set.insert(PriceVector(9n, 80).unwrap());
-                let response: Array<PriceVectorData> = _set
-                    .getRange([0n, 80n])
-                    .unwrap()
-                    .map(v => PriceVectorData({timestamp: Number(v.timestamp()), price: v.price()}).unwrap());
-                rs.send(response);
+
+            // #region Chart
+
+            .post<Api[number]>("/chart/vector", (rq, rs) => {
+                let { timestamp } = rq.body.request;
+                let isValidTimestampParam: boolean =
+                    !!timestamp
+                    && typeof timestamp === "number"
+                    && Number.isInteger(timestamp)
+                    && timestamp >= 0
+                    && timestamp < Number.MAX_SAFE_INTEGER;
+                if (!isValidTimestampParam) rs.send(["ERR_INVALID_PARAMS"]);
+                else {
+                    let timestamp$: bigint = BigInt(timestamp);
+                    let r: ReturnType<PriceVectorSet["get"]> = _set.get(timestamp$);
+                    if (r.err) rs.send([r.toString()]);
+                    else r.map(v => PriceVectorData({timestamp: Number(v.timestamp()), price: v.price()}))
+                }
                 return;
             })
 
-            .post<Api[number]>("/supply", async (rq, rs) => {
+            .post<Api[number]>("/chart/vector/range", (rq, rs) => {
+                let { from, to } = rq.body.request;
+                let isValidFromParam: boolean =
+                    !!from
+                    && typeof from === "number"
+                    && Number.isInteger(from)
+                    && from >= 0
+                    && from < Number.MAX_SAFE_INTEGER;
+                let isValidToParam: boolean =
+                    !!to
+                    && typeof to === "number"
+                    && Number.isInteger(to)
+                    && to > from
+                    && to < Number.MAX_SAFE_INTEGER;
+                if (!isValidFromParam || !isValidToParam) rs.send(["ERR_INVALID_PARAMS"]);
+                else {
+                    let from$: bigint = BigInt(from);
+                    let to$: bigint = BigInt(to);
+                    let r: ReturnType<PriceVectorSet["getRange"]> = _set.getRange([from$, to$]);
+                    if (r.err) rs.send([r.toString()]);
+                    else {
+                        let response: Array<PriceVectorData> = [];
+                        r
+                            .unwrap()
+                            .map(v => PriceVectorData({timestamp: Number(v.timestamp()), price: v.price()}))
+                            .map(v => v.map(v => response.push(v)));
+                        rs.send(response);
+                    }
+                }
+                return;
+            })
+
+
+            // #region Treasury
+
+            .post<Api[number]>("/treasury/supply", async (rq, rs) => {
                 if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
-                else rs.send(_treasury.supply());
+                else rs.send([_treasury.supply()]);
                 return;
             })
 
-            /// NOTE If any `AssetData` is broken, it will be omitted in the response.
-            .post<Api[number]>("/assets", async (rq, rs) => {
+            .post<Api[number]>("/treasury/assets", async (rq, rs) => {
                 if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
                 else 
                     rs.send(((await Promise
@@ -519,7 +657,7 @@ function App(): App {
                 return;
             })
             
-            .post<Api[number]>("/assets-by-key", async (rq, rs) => {
+            .post<Api[number]>("/treasury/assets-by-key", async (rq, rs) => {
                 if (!_hasValidPassword(rq)) { rs.send("ERR_INVALID_PASSWORD"); return; }
                 let { _, key } = rq.body.request;
                 if (typeof key === undefined) { rs.send("ERR_KEY_REQUIRED"); return; }
@@ -650,4 +788,4 @@ function App(): App {
     }
 }
 
-App().run();
+(await App()).unwrap().run();

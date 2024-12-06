@@ -508,12 +508,12 @@ type Api = [
     "/chart/vector/range",
     "/treasury/supply",
     "/treasury/assets",
-    "/treasury/assets-by-key",
-    "/treasury/assets-by-symbol",
+    "/treasury/assets/key",
+    "/treasury/assets/symbol",
     "/treasury/insert",
     "/treasury/remove",
-    "/treasury/remove-by-key",
-    "/treasury/remove-by-symbol",
+    "/treasury/remove/key",
+    "/treasury/remove/symbol",
     "/treasury/mint",
     "/treasury/burn",
     "/treasury/value",
@@ -584,17 +584,15 @@ async function App(): Promise<AppR> {
             .get<Api[number]>("/", async (_, rs) => rs.sendFile(join(_webDirectory, "App.html")))
 
 
-            // #region Chart
-
             .post<Api[number]>("/chart/vector", (rq, rs) => {
-                let { timestamp } = rq.body.request;
-                let isValidTimestampParam: boolean =
+                let [timestamp] = rq.body;
+                let match: boolean =
                     !!timestamp
                     && typeof timestamp === "number"
                     && Number.isInteger(timestamp)
                     && timestamp >= 0
                     && timestamp < Number.MAX_SAFE_INTEGER;
-                if (!isValidTimestampParam) rs.send(["ERR_INVALID_PARAMS"]);
+                if (!match) rs.send(["ERR_INVALID_PARAMS"]);
                 else {
                     let timestamp$: bigint = BigInt(timestamp);
                     let r: ReturnType<PriceVectorSet["get"]> = _set.get(timestamp$);
@@ -605,20 +603,19 @@ async function App(): Promise<AppR> {
             })
 
             .post<Api[number]>("/chart/vector/range", (rq, rs) => {
-                let { from, to } = rq.body.request;
-                let isValidFromParam: boolean =
+                let [from, to] = rq.body;
+                let match: boolean =
                     !!from
                     && typeof from === "number"
                     && Number.isInteger(from)
                     && from >= 0
-                    && from < Number.MAX_SAFE_INTEGER;
-                let isValidToParam: boolean =
-                    !!to
+                    && from < Number.MAX_SAFE_INTEGER
+                    && !!to
                     && typeof to === "number"
                     && Number.isInteger(to)
                     && to > from
                     && to < Number.MAX_SAFE_INTEGER;
-                if (!isValidFromParam || !isValidToParam) rs.send(["ERR_INVALID_PARAMS"]);
+                if (!match) rs.send(["ERR_INVALID_PARAMS"]);
                 else {
                     let from$: bigint = BigInt(from);
                     let to$: bigint = BigInt(to);
@@ -637,16 +634,14 @@ async function App(): Promise<AppR> {
             })
 
 
-            // #region Treasury
-
             .post<Api[number]>("/treasury/supply", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
                 else rs.send([_treasury.supply()]);
                 return;
             })
 
             .post<Api[number]>("/treasury/assets", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) rs.send("ERR_INVALID_PASSWORD");
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
                 else 
                     rs.send(((await Promise
                         .all(_treasury
@@ -657,121 +652,156 @@ async function App(): Promise<AppR> {
                 return;
             })
             
-            .post<Api[number]>("/treasury/assets-by-key", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) { rs.send("ERR_INVALID_PASSWORD"); return; }
-                let { _, key } = rq.body.request;
-                if (typeof key === undefined) { rs.send("ERR_KEY_REQUIRED"); return; }
-                if (typeof key !== "number") { rs.send("ERR_INVALID_KEY"); return; }
-                let asset: ReturnType<Treasury["assetsByKey"]> = _treasury.assetsByKey(BigInt(key));
-                if (asset.none) { rs.send("ERR_ASSET_NOT_FOUND"); return; }
-                rs.send(asset.unwrap());
+            .post<Api[number]>("/treasury/assets/key", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, key] = rq.body;
+                    let match: boolean =
+                        !!key
+                        && typeof key === "number";
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let asset: ReturnType<Treasury["assetsByKey"]> = _treasury.assetsByKey(BigInt(key));
+                        if (asset.none) rs.send(["ERR_ASSET_NOT_FOUND"]);
+                        else rs.send([asset.unwrap()]);
+                    }
+                }
                 return;
             })
             
-            .post<Api[number]>("/assets-by-symbol", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
+            .post<Api[number]>("/treasury/assets/symbol", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, symbol] = rq.body;
+                    let match: boolean = 
+                        !!symbol
+                        && typeof symbol === "string";
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let asset: ReturnType<Treasury["assetsBySymbol"]> = _treasury.assetsBySymbol(symbol);
+                        if (asset.none) rs.send(["ERR_ASSET_NOT_FOUND"]);
+                        else rs.send([asset.unwrap()]);
+                    }
                 }
-                let { _, symbol } = rq.body.request;
-                if (typeof symbol !== "string") {
-                    rs.send("ERR_");
-                    return;
-                }
-
-            })
-
-            .post<Api[number]>("/insert", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) { rs.send("ERR_INVALID_PASSWORD"); return }
-                let { _, asset: assetD } = rq.body.request;
-                if (typeof assetD === undefined) { rs.send("ERR_ASSET_REQUIRED"); return; }
-                let match: boolean =
-                    "symbol" in assetD
-                    && "amount" in assetD
-                    && typeof assetD.symbol === "string"
-                    && typeof assetD.amount === "number";
-                if (!match) { rs.send("ERR_INVALID_ASSET"); return; }
-                let asset: AssetR = Asset(assetD.symbol, assetD.amount);
-                if (asset.err) { rs.send(asset.toString()); return; }
-                _treasury.insert(asset.unwrap());
                 return;
             })
 
-            .post<Api[number]>("/remove", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
+            .post<Api[number]>("/treasury/insert", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, assetD] = rq.body;
+                    let match: boolean =
+                        !!assetD
+                        && typeof assetD === "object"
+                        && "symbol" in assetD
+                        && "amount" in assetD
+                        && typeof assetD.symbol === "string"
+                        && typeof assetD.amount === "number";
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let asset: AssetR = Asset(assetD.symbol, assetD.amount);
+                        if (asset.err) rs.send([asset.toString()]);
+                        else _treasury.insert(asset.unwrap());
+                    }
                 }
-                _treasury.remove();
                 return;
             })
 
-            .post<Api[number]>("/remove-by-key", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
-                }
-                let { _, key } = rq.body.request;
-                if (typeof key === "undefined") {
-                    rs.send("ERR_KEY_REQUIRED");
-                    return;
-                }
-                if (typeof key !== "number") {
-                    rs.send("TYPE_ERR");
-                    return;
-                }
-                _treasury.removeByKey(BigInt(key));
-            })
-
-            .post<Api[number]>("/mint", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
-                }
-                let { _, amount } = rq.body.request;
-                if (typeof amount === "undefined") {
-                    rs.send("ERR_AMOUNT_REQUIRED");
-                    return;
-                }
-                if (typeof amount !== "number") {
-                    rs.send("TYPE_ERR");
-                    return;
-                }
-                _treasury.mint(amount);
+            .post<Api[number]>("/treasury/remove", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else _treasury.remove();
                 return;
             })
 
-            .post<Api[number]>("/burn", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
-                }
-                let { _, amount } = rq.body.request;
-                if (typeof amount === "undefined") {
-                    rs.send("ERR_AMOUNT_REQUIRED");
-                    return;
-                }
 
-            })
-
-            .post("/value", async (rq, rs) => {
-                if (!_hasValidPassword(rq)) {
-                    rs.send("ERR_INVALID_PASSWORD");
-                    return;
+            .post<Api[number]>("/treasury/remove/key", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, key] = rq.body;
+                    let match: boolean =
+                        !!key
+                        && typeof key === "number"
+                        && key > 0
+                        && key < Number.MAX_SAFE_INTEGER;
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let r: ReturnType<Treasury["removeByKey"]> = _treasury.removeByKey(BigInt(key));
+                        if (r.err) rs.send(["ERR_ASSET_NOT_FOUND"]);
+                    }
                 }
-                let value_: Awaited<ReturnType<Treasury["value"]>> = await _treasury.value();
-                if (value_.err) {
-                    rs.send(value_.toString());
-                    return;
-                };
-                rs.send(value_.unwrap());
                 return;
             })
 
-            .get("/value-per-share", async (_, rs) => {
-                let response: Awaited<ReturnType<Treasury["valuePerShare"]>> = await _treasury.valuePerShare();
-                if (response.err) return;
-                rs.send(response.unwrap());
+            .post<Api[number]>("/treasury/remove/symbol", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, symbol] = rq.body;
+                    let match: boolean =
+                        !!symbol
+                        && typeof symbol === "string"
+                        && symbol.length !== 0;
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let r: ReturnType<Treasury["removeBySymbol"]> = _treasury.removeBySymbol(symbol);
+                        if (r.err) rs.send(["ERR_ASSET_NOT_FOUND"]);
+                    }
+                }
+                return;
+            })
+
+            .post<Api[number]>("/treasury/mint", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, amount] = rq.body;
+                    let match: boolean =
+                        !!amount
+                        && typeof amount === "number"
+                        && amount > 0
+                        && amount < Number.MAX_SAFE_INTEGER;
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let r: ReturnType<Treasury["mint"]> = _treasury.mint(amount);
+                        if (r.err) rs.send([r.toString()]);
+                    }
+                }
+                return;
+            })
+
+            .post<Api[number]>("/treasury/burn", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let [_, amount] = rq.body;
+                    let match: boolean =
+                        !!amount
+                        && typeof amount === "number"
+                        && amount > 0
+                        && amount < Number.MAX_SAFE_INTEGER;
+                    if (!match) rs.send(["ERR_INVALID_PARAMS"]);
+                    else {
+                        let r: ReturnType<Treasury["burn"]> = _treasury.burn(amount);
+                        if (r.err) rs.send([r.toString()]);
+                    }
+                }
+                return;
+            })
+
+            .post<Api[number]>("/treasury/value", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let r: Awaited<ReturnType<Treasury["value"]>> = await _treasury.value();
+                    if (r.err) rs.send([r.toString()]);
+                    else rs.send([r.unwrap()]);
+                }
+                return;
+            })
+
+            .post<Api[number]>("/treasury/value/share", async (rq, rs) => {
+                if (!_hasValidPassword(rq)) rs.send(["ERR_INVALID_PASSWORD"]);
+                else {
+                    let r: Awaited<ReturnType<Treasury["valuePerShare"]>> = await _treasury.valuePerShare();
+                    if (r.err) rs.send([r.toString()]);
+                    else rs.send([r.unwrap()]);
+                }
                 return;
             })
 
@@ -779,10 +809,11 @@ async function App(): Promise<AppR> {
     }
 
     function _hasValidPassword(rq: Request): boolean {
+        let [password] = rq.body;
         let match: boolean =
-            "password" in rq.body
-            && typeof rq.body.password
-            && _password.isValid(rq.body.password);
+            !!password
+            && typeof password
+            && _password.isValid(password);
         if (match) return true;
         return false;
     }

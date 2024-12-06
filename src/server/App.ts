@@ -10,13 +10,7 @@ import { None } from "robus";
 import { join } from "path";
 import { default as express } from "express";
 
-type MathIshE =
-    | Err<"ERR_DIV_BY_ZER0">;
-
-
-type PriceVectorDataR = 
-    | PriceVectorDataT
-    | PriceVectorDataE;
+type PriceVectorDataR = PriceVectorDataT | PriceVectorDataE;
 type PriceVectorDataT = Ok<PriceVectorData>;
 type PriceVectorDataE = 
     | Err<"ERR_TIMESTAMP_NOT_INTEGER">
@@ -39,9 +33,7 @@ function PriceVectorData(_$: PriceVectorData): PriceVectorDataR {
     }
 }
 
-type PriceVectorR = 
-    | PriceVectorT 
-    | PriceVectorE;
+type PriceVectorR = PriceVectorT | PriceVectorE;
 type PriceVectorT = Ok<PriceVector>;
 type PriceVectorE = 
     | Err<"ERR_TIMESTAMP_BELOW_ZERO">
@@ -68,24 +60,21 @@ function PriceVector(_timestamp: bigint, _price: number): PriceVectorR {
     }
 }
 
-
 type PriceVectorSet = {
     has(vector: PriceVector): boolean;
     length(): bigint;
     latest(): Option<Readonly<PriceVector>>;
     oldest(): Option<Readonly<PriceVector>>;
 
-    get(timestamp: bigint, lookupThreshold: bigint):
-        | Ok<Option<Readonly<PriceVector>>>
-        | Err<"ERR_TIMESTAMP_BELOW_ZERO">
-        | Err<"ERR_LOOKUP_THRESHOLD_BELOW_ZERO">
+    get(timestamp: bigint):
+        | Ok<Readonly<PriceVector>>
+        | Err<"ERR_TIMESTAMP_BELOW_ZERO">;
 
-    getRange(range: [bigint, bigint], lookupThreshold: bigint):
+    getRange(range: [bigint, bigint]):
         | Ok<ReadonlyArray<PriceVector>>
         | Err<"ERR_RANGE_LOW_BELOW_ZERO">
         | Err<"ERR_RANGE_HIGH_BELOW_ZERO">
-        | Err<"ERR_RANGE_HIGH_BELOW_OR_EQUAL_TO_RANGE_LOW">
-        | Err<"ERR_LOOKUP_THRESHOLD_BELOW_ZERO">;
+        | Err<"ERR_RANGE_HIGH_BELOW_OR_EQUAL_TO_RANGE_LOW">;
 
     insert(vector: PriceVector): boolean;
     remove(timestamp: bigint): boolean;
@@ -128,37 +117,38 @@ function PriceVectorSet(_set: Array<PriceVector>): PriceVectorSet {
         return None;
     }
 
-    function get(... [timestamp, lookupThreshold]: Parameters<PriceVectorSet["get"]>): ReturnType<PriceVectorSet["get"]> {
+    function get(... [timestamp]: Parameters<PriceVectorSet["get"]>): ReturnType<PriceVectorSet["get"]> {
         if (timestamp < 0n) return Err("ERR_TIMESTAMP_BELOW_ZERO");
-        if (lookupThreshold < 0n) return Err("ERR_LOOKUP_THRESHOLD_BELOW_ZERO");
         let match:
             | PriceVector
-            | void 
+            | void
             = _set.find(p => p.timestamp() === timestamp);
-        if (match) return Ok(Some(match));
-        let currentTimestamp: bigint = timestamp - 1n;
-        let i: bigint = 0n;
-        while (currentTimestamp >= 0n && i < lookupThreshold) {
-            let match:
+        if (match) return Ok(match);
+        let i: bigint = BigInt(_set.length);
+        while (i >= 0n) {
+            let vector: 
                 | PriceVector
                 | void 
-                = _set.find(p => p.price() !== 0);
-            if (match) return Ok(Some(match));
-            currentTimestamp--;
-            i++;
+                = _set.at(Number(i));
+            if (vector) {
+                let match: boolean = vector.timestamp() < timestamp && vector.price() !== 0;
+                if (match) return Ok(vector);
+            }
+            i--;
         }
-        return Ok(None);
+        return Ok(PriceVector(timestamp, 0).unwrap());
     }
 
-    function getRange(... [range, lookupThreshold]: Parameters<PriceVectorSet["getRange"]>): ReturnType<PriceVectorSet["getRange"]> {
+    function getRange(... [range]: Parameters<PriceVectorSet["getRange"]>): ReturnType<PriceVectorSet["getRange"]> {
         if (range[0] < 0n) return Err("ERR_RANGE_LOW_BELOW_ZERO");
         if (range[1] < 0n) return Err("ERR_RANGE_HIGH_BELOW_ZERO");
         if (range[1] <= range[0]) return Err("ERR_RANGE_HIGH_BELOW_OR_EQUAL_TO_RANGE_LOW");
-        if (lookupThreshold < 0n) return Err("ERR_LOOKUP_THRESHOLD_BELOW_ZERO");
         let result: Array<PriceVector> = [];
-        let i: bigint = 0n;
-        while (i < range[1]) {
-            get(i, lookupThreshold).map(v => v.map(v => result.push(v)));
+        let i: bigint = range[0];
+        while (i <= range[1]) {
+            let vector: PriceVector = get(i).unwrap();
+            let vectorParsed: PriceVector = PriceVector(i, vector.price()).unwrap();
+            result.push(vectorParsed);
             i++;
         }
         return Ok(result);
@@ -500,7 +490,13 @@ function App(): App {
             .get<Api[number]>("/", async (_, rs) => rs.sendFile(join(_webDirectory, "App.html")))
 
             .get("/vectors", (_, rs) => {
-                rs.send([]);
+                _set.insert(PriceVector(4n, 20).unwrap());
+                _set.insert(PriceVector(9n, 80).unwrap());
+                let response: Array<PriceVectorData> = _set
+                    .getRange([0n, 80n])
+                    .unwrap()
+                    .map(v => PriceVectorData({timestamp: Number(v.timestamp()), price: v.price()}).unwrap());
+                rs.send(response);
                 return;
             })
 

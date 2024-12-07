@@ -1,23 +1,18 @@
 import { Unsafe, type Api } from "@common";
 import { default as Axios } from "axios";
-import { Result } from "robus";
-import { Option } from "robus";
-import { Err } from "robus";
-import { Ok } from "robus";
+import { Result } from "ts-results";
+import { Option } from "ts-results";
+import { Err } from "ts-results";
+import { Ok } from "ts-results";
 import { PriceVectorData } from "@common";
-
-import {createRoot, createRoot as Root} from "react-dom/client";
-import {useDevice} from "./hook/Device";
+import { createRoot as Root } from "react-dom/client";
+import { useDevice } from "./hook/Device";
 import * as React from "react";
 import * as ColorPalette from "./constant/ColorPalette";
 import * as Recharts from "recharts";
 
 function App(): React.ReactNode {
-    let dataset = React.useState<Option<ReadonlyArray<{timestamp: number; price: number}>>>(None);
     let device = useDevice();
-
-
-    // #region Page
 
     let page$: React.CSSProperties = {
         display: "flex",
@@ -37,35 +32,14 @@ function App(): React.ReactNode {
             device === "laptop" ? 1024 :
             device === "tablet" ? 768 :
             device === "mobile" ? 320 :
-            undefined
+            undefined,
         height: "100%"
     };
-
-
-    // #region Line Chart
-
-
-
-
-    React.useEffect(() => {
-        Result.wrapAsync(() => Axios.get("/dataset")).then(result => result.map(response => {
-            let data = response.data;
-            if (!Array.isArray(data)) return;
-            for (let i = 0; i < data.length; i++) {
-                let item = data[i];
-                if (typeof item !== "object") return;
-                if (!("timestamp" in item)) return;
-                if (!("price" in item)) return;
-            }
-            dataset[1](Some((data as any)));
-            return;
-        }));
-    }, []);
 
     return <>
         <div style={page$}>
             <div style={innerPage$}>
-
+                <_Chart/>
             </div>
         </div>
     </>;
@@ -127,21 +101,47 @@ function _Chart(): React.ReactNode {
 
     async function range(fromTimestamp: bigint, toTimestamp: bigint): Promise<
         | Ok<Array<PriceVectorData>>
-        | Err<Unsafe>
-        | Err<"ERR_INVALID_DATA">> {
+        | Err<"ERR_INVALID_DATA">
+        | Err<Unsafe>> {
         let route: Api[number] = "/chart/vector/range";
         let fromTimestampFloat: number = Number(fromTimestamp);
         let toTimestampFloat: number = Number(toTimestamp);
         let response: Result<Axios.AxiosResponse, unknown> = await Result.wrapAsync(async () => await Axios.post(route, [fromTimestampFloat, toTimestampFloat]));
         if (response.err) return Err(Unsafe(response));
         let data: unknown = response.unwrap().data;
-        
+        let match: boolean =
+            data !== undefined
+            && data !== null
+            && Array.isArray(data);
+        if (!match) return Err("ERR_INVALID_DATA");
+        let i: bigint = 0n;
+        while (i < (data as any).length) {
+            let item: unknown = (data as any)[Number(i)];
+            let match: boolean = 
+                item !== undefined
+                && item !== null
+                && typeof item === "object"
+                && "timestamp" in item
+                && "price" in item
+                && typeof item.timestamp === "number"
+                && typeof item.price === "number";
+            if (!match) return Err("ERR_INVALID_DATA");
+            i++;
+        }
         return Ok((data as Array<PriceVectorData>));
     }
 
     React.useEffect(() => {
-        
-
+        (async () => {
+            let now: bigint = BigInt(Date.now());
+            let oneHour: bigint = 3600n * 1000n;
+            let oneHourAgo: bigint = now - oneHour;
+            (await range(oneHourAgo, now))
+                .map(v => setVectors(v))
+                .mapErr(e => console.error(e));
+            return;
+        })();
+        return;
     }, []);
 
     return <>
@@ -156,4 +156,4 @@ function _Chart(): React.ReactNode {
     </>;
 }
 
-createRoot(document.getElementById("root")!).render(<App/>);
+Root(document.getElementById("root")!).render(<App/>);

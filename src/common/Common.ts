@@ -1,5 +1,5 @@
-import { Err } from "robus";
-import { Ok } from "robus";
+import { Err } from "ts-results";
+import { Ok } from "ts-results";
 
 export type Api = [
     "/",

@@ -5,12 +5,12 @@ import { type AssetDataR } from "@common";
 import { type Api } from "@common";
 import { createClient as RedisClient } from "redis";
 import { default as Axios } from "axios";
-import { Option } from "robus";
-import { Result } from "robus";
-import { Ok } from "robus";
-import { Err } from "robus";
-import { Some } from "robus";
-import { None } from "robus";
+import { Option } from "ts-results";
+import { Result } from "ts-results";
+import { Ok } from "ts-results";
+import { Err } from "ts-results";
+import { Some } from "ts-results";
+import { None } from "ts-results";
 import { Unsafe } from "@common";
 import { PriceVectorData } from "@common";
 import { AssetData } from "@common";
@@ -458,9 +458,9 @@ type AppE =
     | TreasuryE
     | PasswordE
     | RedisE
-    | Err<Unsafe>
     | Err<"ERR_MISSING_PASSWORD">
-    | Err<"ERR_MISSING_REDIS_PASSWORD">;
+    | Err<"ERR_MISSING_REDIS_PASSWORD">
+    | Err<Unsafe>;
 type App = {
     run(): ReturnType<ReturnType<typeof express>["listen"]>;
 };
@@ -477,12 +477,6 @@ async function App(): Promise<AppR> {
         _port = 8080n;
         _treasury = Treasury(0, []).unwrap();
         _set = PriceVectorSet([]);
-    }
-
-    /***/ {
-        let r: TreasuryR = Treasury(0, []);
-        if (r.err) return r;
-        _treasury = r.unwrap();
     }
 
     /***/ {
@@ -524,6 +518,9 @@ async function App(): Promise<AppR> {
         }
         else appData = responseUnwrapped;
         appData.assets.forEach(v => _treasury.insert(Asset(v.symbol, v.amount)));
+        let r: TreasuryR = Treasury(appData.supply, []);
+        if (r.err) return r;
+        _treasury = r.unwrap();
     }
 
     /***/ return Ok({ run });
@@ -810,6 +807,14 @@ async function App(): Promise<AppR> {
             i++;
         }
         return true;
+    }
+
+    async function _save() {
+        let appData: AppData = {
+            supply: _treasury.supply(),
+            assets: _treasury.assets().map(v => AssetData({symbol: v.symbol(), amount: v.amount(), quote: 0, value: 0}).unwrap())
+        };
+        await _redis.set("*", JSON.stringify(appData));
     }
 }
 

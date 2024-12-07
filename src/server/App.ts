@@ -1,6 +1,8 @@
 import { type AxiosResponse } from "axios";
 import { type Request } from "express";
 import { type RedisClientType } from "redis";
+import { type AssetDataR } from "@common";
+import { type Api } from "@common";
 import { createClient as RedisClient } from "redis";
 import { default as Axios } from "axios";
 import { Option } from "robus";
@@ -9,23 +11,16 @@ import { Ok } from "robus";
 import { Err } from "robus";
 import { Some } from "robus";
 import { None } from "robus";
+import { Unsafe } from "@common";
+import { PriceVectorData } from "@common";
+import { AssetData } from "@common";
 import { join } from "path";
+import { log } from "console";
 import { default as express } from "express";
 
-type Unsafe = {
-    unwrap(): unknown;
-};
-function Unsafe(_item: unknown): Unsafe {
-    /***/ return { unwrap };
-
-    function unwrap(): unknown {
-        return _item;
-    }
-}
-
 type Database = {
-    get(key: string): Promise<Ok<unknown> | Err<unknown>>;
-    set(key: string, value: string): Promise<Result<Option<string>, unknown>>;
+    get(key: string): Promise<Ok<Unsafe> | Err<Unsafe>>;
+    set(key: string, value: string): Promise<Result<Option<string>, Unsafe>>;
 };
 
 type RedisR = RedisT | RedisE;
@@ -62,12 +57,14 @@ async function Redis(_host: string, _port: bigint, _password: string): Promise<R
     }
 
     async function get(... [key]: Parameters<Redis["get"]>): ReturnType<Redis["get"]> {
-        return await Result.wrapAsync(async () => await _socket.get(key));        
+        let r: Result<string | null, unknown> = await Result.wrapAsync(async () => await _socket.get(key));        
+        if (r.err) return Err(Unsafe(r.val));
+        return Ok(Unsafe(r.val));
     }
 
     async function set(... [key, value]: Parameters<Redis["set"]>): ReturnType<Redis["set"]> {
         let r: Result<string | null, unknown> = await Result.wrapAsync(async () => await _socket.set(key, value));
-        if (r.err) return r;
+        if (r.err) return Err(Unsafe(r.val));
         if (typeof r === "string") return Ok(Some(r));
         if (typeof r === null) return Ok(None);
         return Ok(None);
@@ -81,29 +78,6 @@ async function Redis(_host: string, _port: bigint, _password: string): Promise<R
     }
 }
 
-
-type PriceVectorDataR = PriceVectorDataT | PriceVectorDataE;
-type PriceVectorDataT = Ok<PriceVectorData>;
-type PriceVectorDataE = 
-    | Err<"ERR_TIMESTAMP_NOT_INTEGER">
-    | Err<"ERR_TIMESTAMP_BELOW_ZERO">
-    | Err<"ERR_TIMESTAMP_ABOVE_MSI">
-    | Err<"ERR_PRICE_BELOW_ZERO">
-    | Err<"ERR_PRICE_ABOVE_MSI">;
-type PriceVectorData = {
-    timestamp: number;
-    price: number;
-};
-function PriceVectorData(_$: PriceVectorData): PriceVectorDataR {
-    /***/ {
-        if (!Number.isInteger(_$.timestamp)) return Err("ERR_TIMESTAMP_NOT_INTEGER");
-        if (_$.timestamp < 0) return Err("ERR_TIMESTAMP_BELOW_ZERO");
-        if (_$.timestamp > Number.MAX_SAFE_INTEGER) return Err("ERR_TIMESTAMP_ABOVE_MSI");
-        if (_$.price < 0) return Err("ERR_PRICE_BELOW_ZERO");
-        if (_$.price > Number.MAX_SAFE_INTEGER) return Err("ERR_PRICE_ABOVE_MSI");
-        return Ok(_$);
-    }
-}
 
 type PriceVectorR = PriceVectorT | PriceVectorE;
 type PriceVectorT = Ok<PriceVector>;
@@ -280,35 +254,6 @@ function Password(_password: string): PasswordR {
     }
 }
 
-
-type AssetDataR = AssetDataT | AssetDataE;
-type AssetDataT = Ok<AssetData>;
-type AssetDataE =
-    | Err<"ERR_SYMBOL_REQUIRED">
-    | Err<"ERR_AMOUNT_BELOW_ZERO">
-    | Err<"ERR_AMOUNT_ABOVE_MSI">
-    | Err<"ERR_QUOTE_BELOW_ZERO">
-    | Err<"ERR_QUOTE_ABOVE_MSI">
-    | Err<"ERR_VALUE_BELOW_ZERO">
-    | Err<"ERR_VALUE_ABOVE_MSI">;
-type AssetData = {
-    symbol: string;
-    amount: number;
-    quote: number;
-    value: number;
-};
-function AssetData(_$: AssetData): AssetDataR {
-    /***/ {
-        if (_$.symbol.length === 0) return Err("ERR_SYMBOL_REQUIRED");
-        if (_$.amount < 0) return Err("ERR_AMOUNT_BELOW_ZERO");
-        if (_$.amount > Number.MAX_SAFE_INTEGER) return Err("ERR_AMOUNT_ABOVE_MSI");
-        if (_$.quote < 0) return Err("ERR_QUOTE_BELOW_ZERO");
-        if (_$.quote > Number.MAX_SAFE_INTEGER) return Err("ERR_QUOTE_ABOVE_MSI");
-        if (_$.value < 0) return Err("ERR_VALUE_BELOW_ZERO");
-        if (_$.value > Number.MAX_SAFE_INTEGER) return Err("ERR_VALUE_ABOVE_MSI");
-        return Ok(_$);
-    }
-}
 
 type AssetR = Result<AssetT, AssetE>;
 type AssetT = Asset;
@@ -502,23 +447,10 @@ function Treasury(_supply: number, _assets: Array<Readonly<Asset>>): TreasuryR {
 }
 
 
-type Api = [
-    "/",
-    "/chart/vector",
-    "/chart/vector/range",
-    "/treasury/supply",
-    "/treasury/assets",
-    "/treasury/assets/key",
-    "/treasury/assets/symbol",
-    "/treasury/insert",
-    "/treasury/remove",
-    "/treasury/remove/key",
-    "/treasury/remove/symbol",
-    "/treasury/mint",
-    "/treasury/burn",
-    "/treasury/value",
-    "/treasury/value/share"
-];
+type AppData = {
+    supply: number;
+    assets: Array<AssetData>;
+};
 
 type AppR = AppT | AppE;
 type AppT = Ok<App>;
@@ -526,6 +458,7 @@ type AppE =
     | TreasuryE
     | PasswordE
     | RedisE
+    | Err<Unsafe>
     | Err<"ERR_MISSING_PASSWORD">
     | Err<"ERR_MISSING_REDIS_PASSWORD">;
 type App = {
@@ -540,7 +473,7 @@ async function App(): Promise<AppR> {
     let _redis: Redis;
 
     /***/ {
-        _webDirectory = join(__dirname, "web");
+        _webDirectory = join(__dirname, "client");
         _port = 8080n;
         _treasury = Treasury(0, []).unwrap();
         _set = PriceVectorSet([]);
@@ -572,6 +505,25 @@ async function App(): Promise<AppR> {
         let r: RedisR = await Redis("redis-15112.c259.us-central1-2.gce.redns.redis-cloud.com", 15112n, env);
         if (r.err) return r;
         _redis = r.unwrap();
+    }
+
+    /***/ {
+        let response: Awaited<ReturnType<typeof _redis.get>> = await _redis.get("*");
+        if (response.err) return response;
+        let responseUnwrapped: unknown = response.unwrap().unwrap();
+        let appData: AppData;
+        if (!_isAppData(responseUnwrapped)) {
+            appData = {
+                supply: 0,
+                assets: []
+            };
+            let appDataString: Result<string, unknown> = Result.wrap(() => JSON.stringify(appData));
+            if (appDataString.err) return Err(Unsafe(appDataString.val));
+            let r: Awaited<ReturnType<typeof _redis.set>> = await _redis.set("*", JSON.stringify(appDataString.unwrap()));
+            if (r.err) return r;
+        }
+        else appData = responseUnwrapped;
+        appData.assets.forEach(v => _treasury.insert(Asset(v.symbol, v.amount)));
     }
 
     /***/ return Ok({ run });
@@ -817,6 +769,49 @@ async function App(): Promise<AppR> {
         if (match) return true;
         return false;
     }
+
+    function _isAppData(unknown: unknown): unknown is AppData {
+        if (typeof unknown === "string") {
+            let r: Result<object, unknown> = Result.wrap(() => JSON.parse((unknown as string)));
+            if (r.err) return false;
+            unknown = r.unwrap();
+        }
+        let match: boolean =
+            unknown !== undefined
+            && unknown !== null
+            && typeof unknown === "object"
+            && unknown !== null
+            && "assets" in (unknown as any)
+            && Array.isArray((unknown as any).assets);
+        if (!match) return false;
+        let i: bigint = 0n;
+        while (i < (unknown as any).assets.length) {
+            let asset: unknown = (unknown as any).assets[Number(i)];
+            let match: boolean =
+                asset !== undefined
+                && asset !== undefined
+                && typeof asset === "object"
+                && "symbol" in (asset as any)
+                && "amount" in (asset as any)
+                && "quote" in (asset as any)
+                && "value" in (asset as any)
+                && typeof (asset as any).symbol === "number"
+                && typeof (asset as any).amount === "number"
+                && typeof (asset as any).quote === "number"
+                && typeof (asset as any).value === "number"
+                && (asset as any).symbol.length !== 0
+                && (asset as any).amount > 0
+                && (asset as any).amount < Number.MAX_SAFE_INTEGER
+                && (asset as any).quote > 0
+                && (asset as any).quote < Number.MAX_SAFE_INTEGER
+                && (asset as any).value > 0
+                && (asset as any).value < Number.MAX_SAFE_INTEGER;
+            if (!match) return false;  
+            i++;
+        }
+        return true;
+    }
 }
 
 (await App()).unwrap().run();
+log("*");

@@ -32,8 +32,7 @@ let app1: string = "src/client/App.html";
     entry: [
         "src/server/App.ts"
     ],
-    format: ["cjs", "esm"],
-    dts: true,
+    format: ["esm"],
     tsconfig: "tsconfig.json",
     minify: true,
     outDir: "dist"

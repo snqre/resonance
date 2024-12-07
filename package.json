@@ -20,11 +20,15 @@
     "axios": "^1.7.8",
     "express": "^4.21.1",
     "react": "^18.3.1",
+    "react-bash": "^1.6.0",
     "react-dom": "^18.3.1",
+    "react-terminal": "^1.4.4",
     "recharts": "^2.13.3",
     "redis": "^4.7.0",
     "robus": "^0.0.6",
+    "terminal-in-react": "^4.3.1",
     "ts-results": "^3.3.0",
-    "tslib": "^2.8.1"
+    "tslib": "^2.8.1",
+    "xterm": "^5.3.0"
   }
 }

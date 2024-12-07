@@ -1,11 +1,13 @@
-import {default as Axios} from "axios";
-import {Result} from "ts-results";
-import {Option} from "ts-results";
-import {Some} from "ts-results";
-import {None} from "ts-results";
+import { Unsafe, type Api } from "@common";
+import { default as Axios } from "axios";
+import { Result } from "robus";
+import { Option } from "robus";
+import { Err } from "robus";
+import { Ok } from "robus";
+import { PriceVectorData } from "@common";
+
 import {createRoot, createRoot as Root} from "react-dom/client";
 import {useDevice} from "./hook/Device";
-
 import * as React from "react";
 import * as ColorPalette from "./constant/ColorPalette";
 import * as Recharts from "recharts";
@@ -35,13 +37,49 @@ function App(): React.ReactNode {
             device === "laptop" ? 1024 :
             device === "tablet" ? 768 :
             device === "mobile" ? 320 :
-            undefined,
+            undefined
         height: "100%"
     };
 
 
     // #region Line Chart
 
+
+
+
+    React.useEffect(() => {
+        Result.wrapAsync(() => Axios.get("/dataset")).then(result => result.map(response => {
+            let data = response.data;
+            if (!Array.isArray(data)) return;
+            for (let i = 0; i < data.length; i++) {
+                let item = data[i];
+                if (typeof item !== "object") return;
+                if (!("timestamp" in item)) return;
+                if (!("price" in item)) return;
+            }
+            dataset[1](Some((data as any)));
+            return;
+        }));
+    }, []);
+
+    return <>
+        <div style={page$}>
+            <div style={innerPage$}>
+
+            </div>
+        </div>
+    </>;
+}
+
+function _Chart(): React.ReactNode {
+    let [vectors, setVectors] = React.useState<Array<PriceVectorData>>([]);
+    let container$: Omit<Recharts.ResponsiveContainerProps, "children"> = {
+        width: "100%",
+        height: 300
+    };
+    let lineChart$ = {
+        data: vectors
+    } as const;
     let xAxis$: Recharts.XAxisProps = {
         fill: ColorPalette.TIMPERWOLD,
         axisLine: false,
@@ -87,35 +125,34 @@ function App(): React.ReactNode {
         fontFamily: "suisse-intl-regular"
     };
 
+    async function range(fromTimestamp: bigint, toTimestamp: bigint): Promise<
+        | Ok<Array<PriceVectorData>>
+        | Err<Unsafe>
+        | Err<"ERR_INVALID_DATA">> {
+        let route: Api[number] = "/chart/vector/range";
+        let fromTimestampFloat: number = Number(fromTimestamp);
+        let toTimestampFloat: number = Number(toTimestamp);
+        let response: Result<Axios.AxiosResponse, unknown> = await Result.wrapAsync(async () => await Axios.post(route, [fromTimestampFloat, toTimestampFloat]));
+        if (response.err) return Err(Unsafe(response));
+        let data: unknown = response.unwrap().data;
+        
+        return Ok((data as Array<PriceVectorData>));
+    }
 
     React.useEffect(() => {
-        Result.wrapAsync(() => Axios.get("/dataset")).then(result => result.map(response => {
-            let data = response.data;
-            if (!Array.isArray(data)) return;
-            for (let i = 0; i < data.length; i++) {
-                let item = data[i];
-                if (typeof item !== "object") return;
-                if (!("timestamp" in item)) return;
-                if (!("price" in item)) return;
-            }
-            dataset[1](Some((data as any)));
-            return;
-        }));
+        
+
     }, []);
 
     return <>
-        <div style={page$}>
-            <div style={innerPage$}>
-                <Recharts.ResponsiveContainer width="100%" height={300}>
-                    <Recharts.LineChart data={[... dataset[0].unwrapOr([])]}>
-                        <Recharts.XAxis {... (xAxis$ as any)}/>
-                        <Recharts.YAxis {... (yAxis$ as any)}/>
-                        <Recharts.Tooltip contentStyle={tooltip$} labelFormatter={timestamp => new Date(timestamp).toLocaleDateString()}/>
-                        <Recharts.Line {... (line$ as any)}/>
-                    </Recharts.LineChart>
-                </Recharts.ResponsiveContainer>
-            </div>
-        </div>
+        <Recharts.ResponsiveContainer {... container$}>
+            <Recharts.LineChart {... lineChart$}>
+                <Recharts.XAxis {... (xAxis$ as any)}/>
+                <Recharts.YAxis {... (yAxis$ as any)}/>
+                <Recharts.Tooltip contentStyle={tooltip$} labelFormatter={timestamp => new Date(timestamp).toLocaleDateString()}/>
+                <Recharts.Line {... (line$ as any)}/>
+            </Recharts.LineChart>
+        </Recharts.ResponsiveContainer>
     </>;
 }
 
